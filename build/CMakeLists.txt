@@ -20,6 +20,6 @@ SET(CMAKE_BUILD_TYPE "Debug")
 #    message(STATUS "optional:-std=c++11")   
 #endif(CMAKE_COMPILER_IS_GNUCXX)
 #上面的语句能设置可执行文件的输出目录
-set (EXECUTABLE_OUTPUT_PATH  ../bin)
+#set (EXECUTABLE_OUTPUT_PATH  ../bin)
 ADD_EXECUTABLE(timer ${DIR_SRCS}  ../bin )
 target_link_libraries( timer -lpthread )

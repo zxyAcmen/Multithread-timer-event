@@ -28,7 +28,7 @@ typedef struct min_heap {
 } min_heap_t;
 
 typedef struct timer_base {
-    pthread_t exec_func_pid[3];
+    pthread_t *exec_func_pid;
     pthread_t dispatch_id;
     pthread_mutex_t event_mutex;
     pthread_mutex_t callback_mutex;
@@ -39,6 +39,7 @@ typedef struct timer_base {
     struct evcall_queue_stru evcall_queue_stru_head;
     int th_notify_fd[2];
     volatile unsigned char queue_empty;
+    int timer_exec_th_num;
 } timer_base;
 
 #endif //__TIME_STRUCT_H__

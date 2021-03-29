@@ -5,8 +5,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-
-#include "timer_struct.h"
 #include "timer_event.h"
 static uint64_t get_cur_time(void)
 {
@@ -37,17 +35,17 @@ void test_print2(void * c) {
 int main(int argc, char **argv)  
 {
     //system call
-    time_event_init();
+    time_event_init(3);
     struct timeval timer1;
     timer1.tv_sec = 0;
     timer1.tv_usec = 10000;//100000 才是100ms
-    add_new_time(test_print, NULL, &timer1);
+    add_new_timer(test_print, NULL, &timer1);
     timer1.tv_sec = 0;
     timer1.tv_usec = 20000;//100000 才是100ms
-    add_new_time(test_print1, NULL, &timer1);
+    add_new_timer(test_print1, NULL, &timer1);
     timer1.tv_sec = 0;
     timer1.tv_usec = 30000;//100000 才是100ms
-    add_new_time(test_print2, NULL, &timer1);
+    add_new_timer(test_print2, NULL, &timer1);
     while (1)
     {
         sleep(12);

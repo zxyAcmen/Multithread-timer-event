@@ -26,7 +26,7 @@ long evutil_tv_to_msec_(const struct timeval *tv) {
     return (tv->tv_sec * 1000) + ((tv->tv_usec + 999) / 1000); 
 }
 static void timeout_process(min_heap_t * minheap);
-static void add_time_event(struct time_event *event_data, struct timeval *now);
+static void add_timer_event(struct time_event *event_data);
 
 static int get_clock_time(struct timespec *spec) {
     if (clock_gettime(CLOCK_MONOTONIC, spec) == -1) {
@@ -42,7 +42,7 @@ int gettime(struct timeval *tp) {
 #ifdef CLOCK_MONOTONIC
     struct timespec spec;
     if (-1 == get_clock_time(&spec)) {
-        printf("get_clock_time error \n");
+        //printf("get_clock_time error \n");
         return -1;
     }
     tp->tv_sec = spec.tv_sec;
@@ -55,8 +55,8 @@ int gettime(struct timeval *tp) {
     tp->tv_usec = cur_time.tv_usec;
     return 0;
 }
-
-bool add_new_time(void (*cb_callback)(void *args), void *args, struct timeval * use_tv) {
+//新加入的事件需要处理当前是否应该唤醒 是否已经超时，和是否小于当前阻塞待的时间值，这俩个都需要处理
+bool add_new_timer(void (*cb_callback)(void *args), void *args, struct timeval * use_tv) {
     if (use_tv == NULL || (use_tv->tv_sec == 0 && use_tv->tv_usec == 0)) {
         return false;
     }
@@ -68,23 +68,32 @@ bool add_new_time(void (*cb_callback)(void *args), void *args, struct timeval * 
     ev->call_info.evcb_arg = args;
     ev->delay_time = *use_tv;
     ev->call_info.base = ev;
-    add_time_event(ev, NULL);
+    add_timer_event(ev);
     return true;
 }
 
-void add_time_event(struct time_event *event_data, struct timeval *now)
+void add_timer_event(struct time_event *event_data)
 {
     struct timeval tmp_now;
-    if (NULL == now) {
+    if (event_data->ev_timeout.tv_sec == 0 && event_data->ev_timeout.tv_usec == 0) {
         gettime(&tmp_now);
     } else {
-        tmp_now = *now;
+        tmp_now = event_data->ev_timeout;
+        gettime(&tmp_now);
+        //tmp_now = tmp_now;
     }
     timeradd(&tmp_now, &event_data->delay_time, &event_data->ev_timeout);
+
+    bool is_need_notify = false;
     pthread_mutex_lock(&time_internal_data.event_mutex);
     min_heap_push_(&time_internal_data.minheap_t, event_data);
+    if (event_data->idx == 0) {
+        is_need_notify = true;
+    }
     pthread_mutex_unlock(&time_internal_data.event_mutex);
-    write(time_internal_data.th_notify_fd[1],"1", 1);
+    if (is_need_notify) {
+        write(time_internal_data.th_notify_fd[1],"1", 1);
+    }
     return;
 }
 
@@ -94,7 +103,6 @@ static int timeout_next(struct timeval *tv_p) {
 	int res = 0;
     pthread_mutex_lock(&time_internal_data.event_mutex);
 	struct time_event *  data_base = min_heap_top_(&time_internal_data.minheap_t);
-    pthread_mutex_unlock(&time_internal_data.event_mutex);
 	if (data_base == NULL) {
 		tv_p = NULL;
 		goto out;
@@ -106,15 +114,18 @@ static int timeout_next(struct timeval *tv_p) {
 	}
 
 	if (evutil_timercmp(&data_base->ev_timeout, &now, <=)) {
+        printf("dfsdfdsfs\n");
 		evutil_timerclear(tv);
 		goto out;
 	}
     evutil_timersub(&data_base->ev_timeout, &now, tv);
+    pthread_mutex_unlock(&time_internal_data.event_mutex);
 out:
+    pthread_mutex_unlock(&time_internal_data.event_mutex);
 	return (res);
 }
 
-static void * time_dispatch(void *args) {
+static void * timer_dispatch(void *args) {
     UNUSED(args);
     struct timeval dafeult = {.tv_sec = 0, .tv_usec = 10000}, get_time, wait_time;
     int nret = 0;
@@ -146,9 +157,9 @@ void timeout_process(min_heap_t * minheap) {
         return;
     }
     struct timeval now;
-    pthread_mutex_lock(&time_internal_data.event_mutex);
+    pthread_mutex_lock(&(time_internal_data.event_mutex));
 	if (min_heap_empty_(minheap)) {
-        pthread_mutex_unlock(&time_internal_data.event_mutex);
+        pthread_mutex_unlock(&(time_internal_data.event_mutex));
         return;
 	}
     struct time_event * event_data = NULL;
@@ -160,26 +171,25 @@ void timeout_process(min_heap_t * minheap) {
         }
         notify = false;
         min_heap_erase_(minheap, event_data);
-        pthread_mutex_lock(&time_internal_data.callback_mutex);
-        if (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head) || time_internal_data.queue_empty) {
+
+        pthread_mutex_lock(&(time_internal_data.callback_mutex));
+        if (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head) && time_internal_data.queue_empty) {
             notify = true;
         }
         TAILQ_INSERT_TAIL(&time_internal_data.evcall_queue_stru_head, &(event_data->call_info), evcb_active_next);
-        pthread_mutex_unlock(&time_internal_data.callback_mutex);
-        if (notify) {
-            pthread_cond_signal(&time_internal_data.call_cond);
+        pthread_mutex_unlock(&(time_internal_data.callback_mutex));
+        if (notify == true) {
+            pthread_cond_signal(&(time_internal_data.call_cond));
         }
-        printf(" timer test pid = %5lu 1111111111111111111 \n", syscall(SYS_gettid));
 	}
-    pthread_mutex_unlock(&time_internal_data.event_mutex);
-    printf(" timer test pid = %5ld 22222222222222222222 \n", syscall(SYS_gettid));
+    pthread_mutex_unlock(&(time_internal_data.event_mutex));
     return;
 }
 
 static void * timer_exec_func(void *args) {
     /* Set thread name for profiling and debuging */
 	char thread_name[32] = {0};
-	snprintf(thread_name, 32, "eli_timer_th_%d", *(int *)args);
+	snprintf(thread_name, 32, "timer_th_%d", *(int *)args);
 #if defined(__linux__)
 	prctl(PR_SET_NAME, thread_name);
 #elif defined(__APPLE__) && defined(__MACH__)
@@ -190,25 +200,23 @@ static void * timer_exec_func(void *args) {
 
     struct event_callback * callback_info = NULL;
     while(time_internal_data.exec_func_runing) {
-        pthread_mutex_lock(&time_internal_data.callback_mutex);
+        pthread_mutex_lock(&(time_internal_data.callback_mutex));
         while (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head)) {
-            time_internal_data.queue_empty++;
-            printf(" pid= %5ld test 99999999999999999\n ",syscall(SYS_gettid));
-            pthread_cond_wait(&time_internal_data.call_cond, &time_internal_data.callback_mutex);
+            time_internal_data.queue_empty = 1;
+            pthread_cond_wait(&time_internal_data.call_cond, &(time_internal_data.callback_mutex));
+            time_internal_data.queue_empty = 0;
         }
-        time_internal_data.queue_empty--;
         callback_info = TAILQ_FIRST(&time_internal_data.evcall_queue_stru_head);
         evcb_callback_type cb = callback_info->evcb_callback;
         void * args = callback_info->evcb_arg;
         if (NULL != callback_info) {
-            printf(" pid= %5ld test 7777777777777777\n ", syscall(SYS_gettid));
             TAILQ_REMOVE(&time_internal_data.evcall_queue_stru_head, callback_info, evcb_active_next);
         }
-        pthread_mutex_unlock(&time_internal_data.callback_mutex);
+        pthread_mutex_unlock(&(time_internal_data.callback_mutex));
         if (NULL != callback_info) {
             cb(args);
         }
-        add_time_event(callback_info->base, NULL);
+        add_timer_event(callback_info->base);
     }
     return NULL;
 }
@@ -216,14 +224,19 @@ static void * timer_exec_func(void *args) {
 static void time_thread_init() {
     time_internal_data.exec_func_runing = true;
     time_internal_data.queue_empty = 0;
-    for (int i = 0; i < 3; ++i) {
-        pthread_create(&time_internal_data.exec_func_pid[i], NULL, timer_exec_func, (void *)&i);
+    for (int i = 0; i < time_internal_data.timer_exec_th_num; ++i) {
+        pthread_create(&(time_internal_data.exec_func_pid[i]), NULL, timer_exec_func, (void *)&i);
     }
     return;
 }
 
-void time_event_init(void) {
+void time_event_init(int timer_exec_th_num) {
     TAILQ_INIT(&time_internal_data.evcall_queue_stru_head);
+    time_internal_data.timer_exec_th_num = timer_exec_th_num;
+    time_internal_data.exec_func_pid = calloc(1, sizeof(pthread_t) * time_internal_data.timer_exec_th_num);
+    if (time_internal_data.exec_func_pid == NULL) {
+        return;
+    }
     time_thread_init();
     time_internal_data.dis_runing = true;
     min_heap_ctor_(&time_internal_data.minheap_t);
@@ -233,20 +246,29 @@ void time_event_init(void) {
     pthread_cond_init(&time_internal_data.call_cond, NULL);
     time_internal_data.th_notify_fd[0] = -1;
     time_internal_data.th_notify_fd[1] = -1;
-    if (pipe(time_internal_data.th_notify_fd) != 0) {
+    if (pipe(time_internal_data.th_notify_fd) < 0) {
+        printf("11111111111111\n");
+        exit(0);
         return;
     }
-    pthread_create(&time_internal_data.dispatch_id, NULL, time_dispatch, NULL);
+    pthread_create(&time_internal_data.dispatch_id, NULL, timer_dispatch, NULL);
     return;
 }
 
 void time_event_destroy(void) {
     time_internal_data.dis_runing = false;
+    time_internal_data.exec_func_runing = false;
     min_heap_dtor_(&(time_internal_data.minheap_t));
     pthread_mutex_destroy(&(time_internal_data.event_mutex));
     pthread_mutex_destroy(&(time_internal_data.callback_mutex));
     pthread_cond_destroy(&(time_internal_data.call_cond));
     pthread_join(time_internal_data.dispatch_id, NULL);
+    for (int idx = 0; idx < time_internal_data.timer_exec_th_num; ++idx) {
+        if (time_internal_data.dispatch_id != 0) {
+            pthread_join(time_internal_data.exec_func_pid[idx], NULL);
+        }
+    }
+    free(time_internal_data.exec_func_pid);
     return;
 }
 

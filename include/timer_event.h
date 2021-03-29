@@ -4,10 +4,10 @@
 #include <stdbool.h>
 
 //system call
-void time_event_init(void);
+void time_event_init(int timer_exec_th_num);
 //user call
 //add timer
-bool add_new_time(void (*cb)(void * args), void *args, struct timeval * use_tv);
+bool add_new_timer(void (*cb)(void * args), void *args, struct timeval * use_tv);
 // update timer frequency
 void update_timer_frequency(struct timeval * use_tv, void (*cb)(void *));
 // 删除事件

@@ -79,7 +79,7 @@ void add_timer_event(struct time_event *event_data)
         gettime(&tmp_now);
     } else {
         tmp_now = event_data->ev_timeout;
-        gettime(&tmp_now);
+        //gettime(&tmp_now);
         //tmp_now = tmp_now;
     }
     timeradd(&tmp_now, &event_data->delay_time, &event_data->ev_timeout);

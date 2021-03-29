@@ -17,6 +17,9 @@
 
 #include "min_heap.h"
 #include "timer_struct.h"
+#include "timer_event.h"
+
+#define UNUSED(x) (void)(x)
 
 static timer_base time_internal_data;
 long evutil_tv_to_msec_(const struct timeval *tv) { 
@@ -166,10 +169,10 @@ void timeout_process(min_heap_t * minheap) {
         if (notify) {
             pthread_cond_signal(&time_internal_data.call_cond);
         }
-        printf(" timer test pid = %5d 1111111111111111111 \n", syscall(SYS_gettid));
+        printf(" timer test pid = %5lu 1111111111111111111 \n", syscall(SYS_gettid));
 	}
     pthread_mutex_unlock(&time_internal_data.event_mutex);
-    printf(" timer test pid = %5d 22222222222222222222 \n", syscall(SYS_gettid));
+    printf(" timer test pid = %5ld 22222222222222222222 \n", syscall(SYS_gettid));
     return;
 }
 
@@ -190,7 +193,7 @@ static void * timer_exec_func(void *args) {
         pthread_mutex_lock(&time_internal_data.callback_mutex);
         while (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head)) {
             time_internal_data.queue_empty++;
-            printf(" pid= %5d test 99999999999999999\n ",syscall(SYS_gettid));
+            printf(" pid= %5ld test 99999999999999999\n ",syscall(SYS_gettid));
             pthread_cond_wait(&time_internal_data.call_cond, &time_internal_data.callback_mutex);
         }
         time_internal_data.queue_empty--;
@@ -198,7 +201,7 @@ static void * timer_exec_func(void *args) {
         evcb_callback_type cb = callback_info->evcb_callback;
         void * args = callback_info->evcb_arg;
         if (NULL != callback_info) {
-            printf(" pid= %5d test 7777777777777777\n ", syscall(SYS_gettid));
+            printf(" pid= %5ld test 7777777777777777\n ", syscall(SYS_gettid));
             TAILQ_REMOVE(&time_internal_data.evcall_queue_stru_head, callback_info, evcb_active_next);
         }
         pthread_mutex_unlock(&time_internal_data.callback_mutex);

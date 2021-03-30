@@ -10,7 +10,9 @@
 #include <time.h>
 #include <pthread.h>
 #include <sys/syscall.h>
+#include <stdint.h>
 #include <sys/queue.h>
+#include <semaphore.h>
 #if defined(__linux__)
 #include <sys/prctl.h>
 #endif
@@ -22,6 +24,7 @@
 #define UNUSED(x) (void)(x)
 
 static timer_base time_internal_data;
+static sem_t work_sem, master_sem;
 long evutil_tv_to_msec_(const struct timeval *tv) { 
     return (tv->tv_sec * 1000) + ((tv->tv_usec + 999) / 1000); 
 }
@@ -75,13 +78,7 @@ bool add_new_timer(void (*cb_callback)(void *args), void *args, struct timeval *
 void add_timer_event(struct time_event *event_data)
 {
     struct timeval tmp_now;
-    if (event_data->ev_timeout.tv_sec == 0 && event_data->ev_timeout.tv_usec == 0) {
-        gettime(&tmp_now);
-    } else {
-        tmp_now = event_data->ev_timeout;
-        //gettime(&tmp_now);
-        //tmp_now = tmp_now;
-    }
+    gettime(&tmp_now);
     timeradd(&tmp_now, &event_data->delay_time, &event_data->ev_timeout);
 
     bool is_need_notify = false;
@@ -113,9 +110,12 @@ static int timeout_next(struct timeval *tv_p) {
 		goto out;
 	}
 
+    //这里需要做处理，如2ms时，可能少量的线程处理多个任务已经使用了2ms,就会导致select使用默认待时间
 	if (evutil_timercmp(&data_base->ev_timeout, &now, <=)) {
-        printf("dfsdfdsfs\n");
+        printf("dfsdfdsfs          &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&============== \n");
+        //write(time_internal_data.th_notify_fd[1],"1", 1);
 		evutil_timerclear(tv);
+        res = 3;
 		goto out;
 	}
     evutil_timersub(&data_base->ev_timeout, &now, tv);
@@ -128,28 +128,38 @@ out:
 static void * timer_dispatch(void *args) {
     UNUSED(args);
     struct timeval dafeult = {.tv_sec = 0, .tv_usec = 10000}, get_time, wait_time;
-    int nret = 0;
+    int nret = 0, timer_ret = 0;
     char buf[2] = {0};
     fd_set rset, allset;
     FD_ZERO(&allset);
     FD_SET(time_internal_data.th_notify_fd[0], &allset);
     while(time_internal_data.dis_runing) {
         rset = allset;
-        timeout_next(&get_time);
-        wait_time = dafeult;
-        if (get_time.tv_sec != 0 || get_time.tv_usec != 0) {
+        timer_ret = timeout_next(&get_time);
+        if (timer_ret == 3) {
+            wait_time.tv_sec = 0;
+            wait_time.tv_usec = 0;
+        } else {
             wait_time = get_time;
-        }
-        nret = select(time_internal_data.th_notify_fd[0] + 1, &rset, NULL, NULL, &wait_time);
-        if (nret < 0) {
-			exit(0);
-        }
-        if (nret > 0) {
-            read(time_internal_data.th_notify_fd[0], buf, 1);
+            nret = select(time_internal_data.th_notify_fd[0] + 1, &rset, NULL, NULL, &wait_time);
+            if (nret < 0) {
+                exit(0);
+            }
+            if (nret > 0) {
+                read(time_internal_data.th_notify_fd[0], buf, 1);
+            }
         }
         timeout_process(&time_internal_data.minheap_t);
     }
     return NULL;
+}
+
+static uint64_t get_cur_time(void)
+{
+	struct timeb cur_timeb;
+	memset(&cur_timeb, 0 , sizeof(cur_timeb));
+	ftime(&cur_timeb);
+	return (uint64_t)cur_timeb.time * 1000 + cur_timeb.millitm;
 }
 
 void timeout_process(min_heap_t * minheap) {
@@ -157,32 +167,45 @@ void timeout_process(min_heap_t * minheap) {
         return;
     }
     struct timeval now;
-    pthread_mutex_lock(&(time_internal_data.event_mutex));
-	if (min_heap_empty_(minheap)) {
-        pthread_mutex_unlock(&(time_internal_data.event_mutex));
-        return;
-	}
+
     struct time_event * event_data = NULL;
-    bool notify = false;
+    bool notify = false, tmp_exit = false;;
+    gettime(&now);
+    pthread_mutex_lock(&(time_internal_data.event_mutex));
     while ((event_data = min_heap_top_(minheap))) {
-        gettime(&now);
 		if (evutil_timercmp(&event_data->ev_timeout, &now, >)) {
 			break;
         }
         notify = false;
+        tmp_exit = true;
         min_heap_erase_(minheap, event_data);
 
+        printf("time= %llu timeout_process 44444444444\n ", get_cur_time());
+        //pthread_mutex_unlock(&(time_internal_data.event_mutex));
+        pthread_mutex_unlock(&(time_internal_data.event_mutex));
         pthread_mutex_lock(&(time_internal_data.callback_mutex));
-        if (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head) && time_internal_data.queue_empty) {
+//        sem_wait(&master_sem);
+        if (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head) || time_internal_data.queue_empty) {
+            //time_internal_data.queue_empty--;
+            printf("time_internal_data.queue_empty = %d \n ",time_internal_data.queue_empty);
             notify = true;
         }
         TAILQ_INSERT_TAIL(&time_internal_data.evcall_queue_stru_head, &(event_data->call_info), evcb_active_next);
+        //sem_post(&work_sem);
         pthread_mutex_unlock(&(time_internal_data.callback_mutex));
+        
         if (notify == true) {
+            printf("time= %llu timeout_process 5555555555555555 \n ",get_cur_time());
+            //sem_post(&work_sem);
             pthread_cond_signal(&(time_internal_data.call_cond));
         }
-	}
+        printf("time= %llu timeout_process 666666666666666666 \n ",get_cur_time());
+        pthread_mutex_lock(&(time_internal_data.event_mutex));
+    }
     pthread_mutex_unlock(&(time_internal_data.event_mutex));
+    if (tmp_exit) {
+        //time_internal_data.dis_runing = false;
+    }
     return;
 }
 
@@ -201,21 +224,32 @@ static void * timer_exec_func(void *args) {
     struct event_callback * callback_info = NULL;
     while(time_internal_data.exec_func_runing) {
         pthread_mutex_lock(&(time_internal_data.callback_mutex));
+        printf("timer= %llu pid= %5lu timer_exec_func work thread geted callbcak_mutex 11111111111111111111\n ",get_cur_time(),syscall(SYS_gettid));
+        //sem_wait(&work_sem);
         while (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head)) {
-            time_internal_data.queue_empty = 1;
+            time_internal_data.queue_empty++;
+            //sem_post(&master_sem);
+            //sem_wait(&work_sem);
+            printf("timer= %llu pid= %5lu timer_exec_func work thread wait callbcak_mutex 222222222222222\n ",get_cur_time(),syscall(SYS_gettid));
             pthread_cond_wait(&time_internal_data.call_cond, &(time_internal_data.callback_mutex));
-            time_internal_data.queue_empty = 0;
+            printf("timer= %llu pid= %5lu timer_exec_func get callback lock********************\n ",get_cur_time(),syscall(SYS_gettid));
+            time_internal_data.queue_empty--;
         }
+        //return;
         callback_info = TAILQ_FIRST(&time_internal_data.evcall_queue_stru_head);
         evcb_callback_type cb = callback_info->evcb_callback;
         void * args = callback_info->evcb_arg;
         if (NULL != callback_info) {
             TAILQ_REMOVE(&time_internal_data.evcall_queue_stru_head, callback_info, evcb_active_next);
         }
+        //sem_post(&master_sem);
+        printf("timer= %llu pid= %5lu timer_exec_func work thread begin working 3333333333333333\n ",get_cur_time(),syscall(SYS_gettid));
+        //sem_post(&work_sem);//试试这个会不会出问题
         pthread_mutex_unlock(&(time_internal_data.callback_mutex));
         if (NULL != callback_info) {
             cb(args);
         }
+        //pthread_exit(0);
         add_timer_event(callback_info->base);
     }
     return NULL;
@@ -224,6 +258,8 @@ static void * timer_exec_func(void *args) {
 static void time_thread_init() {
     time_internal_data.exec_func_runing = true;
     time_internal_data.queue_empty = 0;
+    sem_init(&work_sem, 0 , 0);
+    sem_init(&master_sem, 0 , 1);
     for (int i = 0; i < time_internal_data.timer_exec_th_num; ++i) {
         pthread_create(&(time_internal_data.exec_func_pid[i]), NULL, timer_exec_func, (void *)&i);
     }

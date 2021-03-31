@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 //system call
-void time_event_init(int timer_exec_th_num);
+void timer_event_init(int timer_exec_th_num);
 //user call
 //add timer
 bool add_new_timer(void (*cb)(void * args), void *args, struct timeval * use_tv);

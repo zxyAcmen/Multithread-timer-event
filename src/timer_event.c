@@ -83,6 +83,8 @@ void add_timer_event(struct time_event *event_data) {
     }
     timeradd(&tmp_now, &event_data->delay_time, &event_data->ev_timeout);
     bool is_need_notify = false;
+    //如果后续需要做动态删除，在结构里再添加一个字段表示这个事件要清除，并统一在此地方做删除，
+    //因为在其它地方做删除可能会导致回调完后重新回来是个空指针而导致程序崩溃
     pthread_mutex_lock(&time_internal_data.event_mutex);
     min_heap_push_(&time_internal_data.minheap_t, event_data);
     if (event_data->idx == 0) {

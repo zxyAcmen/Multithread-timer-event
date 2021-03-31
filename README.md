@@ -1,4 +1,4 @@
-# Multittread-timer-event
+# Multithread-timer-event
 Multithread asynchronous processing timer,
 
 v0.0.0

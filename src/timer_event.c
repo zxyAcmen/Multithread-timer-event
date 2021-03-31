@@ -78,7 +78,11 @@ bool add_new_timer(void (*cb_callback)(void *args), void *args, struct timeval *
 void add_timer_event(struct time_event *event_data)
 {
     struct timeval tmp_now;
-    gettime(&tmp_now);
+    if (event_data->ev_timeout.tv_sec != 0 || event_data->ev_timeout.tv_usec != 0) {
+        tmp_now = event_data->ev_timeout;
+    } else {
+        gettime(&tmp_now);
+    }
     timeradd(&tmp_now, &event_data->delay_time, &event_data->ev_timeout);
 
     bool is_need_notify = false;
@@ -102,6 +106,7 @@ static int timeout_next(struct timeval *tv_p) {
 	struct time_event *  data_base = min_heap_top_(&time_internal_data.minheap_t);
 	if (data_base == NULL) {
 		tv_p = NULL;
+        res = -1;
 		goto out;
 	}
 
@@ -127,7 +132,7 @@ out:
 
 static void * timer_dispatch(void *args) {
     UNUSED(args);
-    struct timeval dafeult = {.tv_sec = 0, .tv_usec = 10000}, get_time, wait_time;
+    struct timeval default_time = {.tv_sec = 0, .tv_usec = 10000}, get_time, wait_time;
     int nret = 0, timer_ret = 0;
     char buf[2] = {0};
     fd_set rset, allset;
@@ -136,18 +141,17 @@ static void * timer_dispatch(void *args) {
     while(time_internal_data.dis_runing) {
         rset = allset;
         timer_ret = timeout_next(&get_time);
-        if (timer_ret == 3) {
-            wait_time.tv_sec = 0;
-            wait_time.tv_usec = 0;
-        } else {
+        if (timer_ret == 0 || timer_ret == 3) {
             wait_time = get_time;
-            nret = select(time_internal_data.th_notify_fd[0] + 1, &rset, NULL, NULL, &wait_time);
-            if (nret < 0) {
-                exit(0);
-            }
-            if (nret > 0) {
-                read(time_internal_data.th_notify_fd[0], buf, 1);
-            }
+        } else {
+            wait_time = default_time;
+        }
+        nret = select(time_internal_data.th_notify_fd[0] + 1, &rset, NULL, NULL, &wait_time);
+        if (nret < 0) {
+            exit(0);
+        }
+        if (nret > 0) {
+            read(time_internal_data.th_notify_fd[0], buf, 1);
         }
         timeout_process(&time_internal_data.minheap_t);
     }
@@ -188,12 +192,12 @@ void timeout_process(min_heap_t * minheap) {
         if (TAILQ_EMPTY(&time_internal_data.evcall_queue_stru_head) || time_internal_data.queue_empty) {
             //time_internal_data.queue_empty--;
             printf("time_internal_data.queue_empty = %d \n ",time_internal_data.queue_empty);
+            //time_internal_data.queue_empty = 0;
             notify = true;
         }
         TAILQ_INSERT_TAIL(&time_internal_data.evcall_queue_stru_head, &(event_data->call_info), evcb_active_next);
         //sem_post(&work_sem);
         pthread_mutex_unlock(&(time_internal_data.callback_mutex));
-        
         if (notify == true) {
             printf("time= %llu timeout_process 5555555555555555 \n ",get_cur_time());
             //sem_post(&work_sem);

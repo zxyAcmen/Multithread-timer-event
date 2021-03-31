@@ -91,27 +91,32 @@ void test_print10(void * c) {
     return ;
 }
 
-
-
 int main(int argc, char **argv)  
 {
     //system call
-    time_event_init(4);
+    time_event_init(1);
     struct timeval timer1;
     timer1.tv_sec = 0;
     timer1.tv_usec = 2000;//100000 才是100ms
     timer1.tv_sec = 0;
     timer1.tv_usec = 2000;//100000 才是100ms
     timer1.tv_sec = 0;
-    timer1.tv_usec = 2000;//100000 才是100ms
     add_new_timer(test_print, NULL, &timer1);
+    timer1.tv_usec = 4000;//100000 才是100ms
     add_new_timer(test_print1, NULL, &timer1);
+    timer1.tv_usec = 6000;//100000 才是100ms
     add_new_timer(test_print2, NULL, &timer1);
+    timer1.tv_usec = 8000;//100000 才是100ms
     add_new_timer(test_print3, NULL, &timer1);
+    timer1.tv_usec = 10000;//100000 才是100ms
     add_new_timer(test_print4, NULL, &timer1);
+    timer1.tv_usec = 12000;//100000 才是100ms
     add_new_timer(test_print5, NULL, &timer1);
+    timer1.tv_usec = 14000;//100000 才是100ms
     add_new_timer(test_print6, NULL, &timer1);
+    timer1.tv_usec = 16000;//100000 才是100ms
     add_new_timer(test_print7, NULL, &timer1);
+    timer1.tv_usec = 18000;//100000 才是100ms
     add_new_timer(test_print8, NULL, &timer1);
 /*
     add_new_timer(test_print9, NULL, &timer1);
